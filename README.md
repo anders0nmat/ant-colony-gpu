@@ -23,4 +23,4 @@ The algoroithm attempts to solve a Sequential Ordering Problem.
 
 ## Scientific sources
 
-_none yet_
+[OpenCL API Specification](https://registry.khronos.org/OpenCL/specs/3.0-unified/html/OpenCL_API.html)

@@ -5,6 +5,7 @@
 #include "cli.hpp"
 
 #include "variants/sequential.hpp"
+#include "variants/manyant.hpp"
 
 
 Profiler Profiler::default_profiler;
@@ -13,6 +14,8 @@ CliParameters cli;
 
 int main(int argc, char* argv[]) {
 	ColonyFactory::add<SequentialOptimizer>();
+	ColonyFactory::add<ManyAntOptimizer>();
+
 
 	cli.addFlag("help", "Prints this help message", {"h"});
 	cli.addFlag("list", "List all optimization variants available", {"l"});

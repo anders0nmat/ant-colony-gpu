@@ -25,7 +25,7 @@ LOCATION_OUTPUT := ./build/main
 ETC_FLAGS := #-DGUI
 
 MAC_FLAGS := #-lglfw3-mac -framework Cocoa -framework OpenGL -framework IOKit
-LINUX_FLAGS := #-lglfw3-linux -lGL -lX11
+LINUX_FLAGS := -lOpenCL#-lglfw3-linux -lGL -lX11
 WINDOWS_FLAGS := 
 
 DEBUG = -O1 --debug
