@@ -67,6 +67,9 @@ public:
 
 	void optimize(unsigned int rounds) override {
 		std::vector<Ant> ants(problem.size());
+		for (Ant& ant : ants) {
+			ant.random_generator.seed(random_generator());
+		}
 		while (rounds-- > 0) {
 			Profiler::start("opts");
 
@@ -79,7 +82,7 @@ public:
 				ant.current_node = 0;
 				ant.route = prototype_ant.route;
 				ant.route_length = 0;
-				ant.random_generator.seed(random_generator());
+				//ant.random_generator.seed(random_generator());
 
 				// Wander Ant
 				for (int i = 0; i < problem.size() - 1; i++) {

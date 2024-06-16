@@ -50,7 +50,10 @@ protected:
 	cl::Program loadProgram(std::filesystem::path path) {
 		std::string program_source = loadFile(path);
 		cl::Program program(context, program_source);
-		if (program.build() != CL_SUCCESS) {
+		std::filesystem::path location = path;
+		location.remove_filename();
+
+		if (program.build("-I \"" + location.string() + "\"") != CL_SUCCESS) {
 			std::cerr
 				<< "[OpenCL] Error building program \"" << path.filename() << "\":"
 				<< program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device) << "\n";

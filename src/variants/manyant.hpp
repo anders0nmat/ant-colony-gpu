@@ -31,6 +31,8 @@ protected:
 	cl::Buffer ant_allowed_d;
 	cl::Buffer rng_seeds_d;
 
+	std::vector<int> allowed_data;
+
 	void advanceAnts() {
 		cl::NDRange global_size(problem.size());
 		advanceAntsCL(
@@ -63,7 +65,7 @@ public:
 
 	void prepare() override {
 		setupCL(true);
-		program = loadProgram("./src/variants/manyant.clcpp");
+		program = loadProgram("./src/variants/manyant.cl");
 
 		pheromone_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(double) * pheromone.adjacency_matrix.data.size());
 		visibility_d = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(double) * visibility.adjacency_matrix.data.size());
@@ -79,6 +81,27 @@ public:
 				double visibility = 1.0 / std::max(params.zero_weight, static_cast<double>(w));
 				return std::pow(visibility, params.beta);
 			} );
+
+		std::vector<int> allowed_prototype(problem.size(), 0);
+		for (int i = 0; i < problem.dependencies.adjacency_matrix.dimension; i++) {
+			int acc = 0;
+			for (int j = 0; j < problem.dependencies.adjacency_matrix.dimension; j++) {
+				if (problem.dependencies.edge(i, j)) {
+					acc++;
+				}
+			}
+			allowed_prototype.at(i) = acc;
+		}
+		for (size_t from = 0; from < problem.size(); from++) {
+			if (problem.dependencies.edge(from, 0)) {
+				allowed_prototype.at(from) -= 1;
+			}
+		}
+		allowed_prototype.at(0) = -1;
+		allowed_data.resize(problem.size() * problem.size(), 0);
+		for (int i = 0; i < allowed_data.size(); i++) {
+			allowed_data.at(i) = allowed_prototype.at(i % allowed_prototype.size());
+		}
 
 		queue.enqueueWriteBuffer(
 			pheromone_d, CL_FALSE, 0,
@@ -98,18 +121,20 @@ public:
 			routes_d, CL_FALSE, 0,
 			sizeof(int) * zero_ints.size(),
 			zero_ints.data());
+		std::fill(zero_ints.begin(), zero_ints.end(), std::numeric_limits<cl_int>::max());
 		queue.enqueueWriteBuffer(
 			routes_length_d, CL_FALSE, 0,
 			sizeof(int) * problem.size(),
 			zero_ints.data());
+		std::fill(zero_ints.begin(), zero_ints.end(), 0);
 		queue.enqueueWriteBuffer(
 			ant_sample_d, CL_FALSE, 0,
 			sizeof(double) * zero_doubles.size(),
 			zero_doubles.data());
 		queue.enqueueWriteBuffer(
 			ant_allowed_d, CL_FALSE, 0,
-			sizeof(int) * zero_ints.size(),
-			zero_ints.data());
+			sizeof(int) * allowed_data.size(),
+			allowed_data.data());
 		std::vector<uint> rngs(problem.size());
 		std::minstd_rand0 rng(params.random_seed);
 		for (auto& i : rngs) {
@@ -120,6 +145,19 @@ public:
 			sizeof(uint) * rngs.size(),
 			rngs.data());
 		queue.finish();
+
+		advanceAntsCL = cl::KernelFunctor<
+			cl::Buffer, // pheromone
+			cl::Buffer, // visibility
+			cl::Buffer, // weights
+			cl::Buffer, // ant_routes
+			cl::Buffer, // ant_routes_length
+			cl::Buffer, // ant_sample
+			cl::Buffer, // ant_allowed
+			cl_int,     // problem_size
+			cl_double,  // alpha
+			cl::Buffer  // rng_seeds
+		>(cl::Kernel(program, "wander_ant"));
 	}
 
 	void optimize(unsigned int rounds) override {
@@ -132,8 +170,9 @@ public:
 			advanceAnts();
 
 			queue.enqueueReadBuffer(routes_length_d, CL_TRUE, 0, sizeof(int) * ant_route_lengths.size(), ant_route_lengths.data());
+			//l::copy(queue, routes_length_d, ant_route_lengths.begin(), ant_route_lengths.end());
 			auto best_ant_it = std::min_element(ant_route_lengths.begin(), ant_route_lengths.end());
-			size_t best_ant_idx = std::distance(best_ant_it, ant_route_lengths.begin());
+			size_t best_ant_idx = std::distance(ant_route_lengths.begin(), best_ant_it);
 			queue.enqueueReadBuffer(routes_d, CL_TRUE, best_ant_idx * problem.size() * sizeof(int), sizeof(int) * problem.size(), ant_route.data());
 			best_route_length = std::min(*best_ant_it, best_route_length);
 
@@ -160,6 +199,10 @@ public:
 				pheromone_d, CL_TRUE, 0,
 				sizeof(double) * pheromone.adjacency_matrix.data.size(),
 				pheromone.adjacency_matrix.data.data());
+			queue.enqueueWriteBuffer(
+				ant_allowed_d, CL_TRUE, 0,
+				sizeof(int) * allowed_data.size(),
+				allowed_data.data());
 
 			Profiler::stop("opts");
 		}
