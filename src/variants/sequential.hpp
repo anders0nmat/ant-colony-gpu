@@ -12,7 +12,25 @@ public:
 		std::vector<int> route;
 		int route_length = 0;
 
-		std::default_random_engine random_generator;
+		struct minstd0_engine {
+			u_int32_t state;
+
+			uint32_t operator()() {
+				const uint a = 16807;
+				const uint c = 0;
+				const uint m = 2147483647;
+
+				state = (a * (state) + c) % m;
+
+				return state;
+			}
+
+			void seed(uint32_t seed) {
+				state = seed;
+			}
+		};
+
+		minstd0_engine random_generator;
 	};
 
 	static constexpr const char* static_name = "sequential";
@@ -24,7 +42,7 @@ public:
 	Graph<double> visibility;
 
 	Ant prototype_ant;
-	std::default_random_engine random_generator;
+	std::minstd_rand0 random_generator;
 
 	SequentialOptimizer(Problem problem, AntParams params)
 	:	AntOptimizer::AntOptimizer(problem, params),
@@ -138,9 +156,12 @@ private:
 
 		bool hasPossibleNext = false;
 		std::vector<double> next_nodes(problem.size(), 0.0);
+		double sum = 0.0;
 		for (size_t next = 0; next < problem.size(); next++) {
-			if (ant.allowed_nodes.at(next) != 0) { continue; } 
-			next_nodes.at(next) = edge_value(ant.current_node, next);
+			if (ant.allowed_nodes.at(next) != 0) { continue; }
+			double val = edge_value(ant.current_node, next);
+			next_nodes.at(next) = val;
+			sum += val;
 			hasPossibleNext = hasPossibleNext || next_nodes.at(next) > 0;
 		}
 
@@ -149,8 +170,22 @@ private:
 			return;
 		}
 
-		std::discrete_distribution<size_t> dist(next_nodes.begin(), next_nodes.end());
-		size_t next_node = dist(ant.random_generator);
+		int next_node = -1;
+		double rd = (static_cast<double>(ant.random_generator()) / UINT32_MAX) * sum;
+		for (size_t i = 0; i < next_nodes.size(); i++) {
+			rd -= next_nodes[i];
+			if (rd < 0) {
+				next_node = i;
+				break;
+			}
+		}
+
+		//std::discrete_distribution<size_t> dist(next_nodes.begin(), next_nodes.end());
+		//size_t next_node = dist(ant.random_generator);
+		if (next_node == -1) {
+			ant.current_node = -1;
+			return;
+		}
 
 		ant.current_node = next_node;
 		ant.route.push_back(next_node);

@@ -6,6 +6,9 @@
 
 #include "variants/sequential.hpp"
 #include "variants/manyant.hpp"
+#include "variants/manyant2.hpp"
+#include "variants/gpupher.hpp"
+#include "variants/phercomp.hpp"
 
 
 Profiler Profiler::default_profiler;
@@ -15,7 +18,9 @@ CliParameters cli;
 int main(int argc, char* argv[]) {
 	ColonyFactory::add<SequentialOptimizer>();
 	ColonyFactory::add<ManyAntOptimizer>();
-
+	ColonyFactory::add<ManyAnt2Optimizer>();
+	ColonyFactory::add<GpuPherOptimizer>();
+	ColonyFactory::add<PherCompOptimizer>();
 
 	cli.addFlag("help", "Prints this help message", {"h"});
 	cli.addFlag("list", "List all optimization variants available", {"l"});
@@ -102,13 +107,15 @@ int main(int argc, char* argv[]) {
 	auto basic_analysis = Profiler::default_profiler.get_minmaxavg("opts");
 	std::cout
 		<< "Finished!\n"
+		<< "Variant: " << colonyIdentifier << (colonyArguments.empty() ? "" : ":" + colonyArguments) << "\n"
 		<< "Result length: " << optimizer->best_route_length << " (" << problem.solution_bounds.first << ", " << problem.solution_bounds.second << ")\n"
-		<< "Prepare Time: " << std::chrono::duration_cast<std::chrono::microseconds>(Profiler::default_profiler.measurements.at("prep").front().first).count() / 1000.0 << "ms\n"
-		<< "Execution Time: " << std::chrono::duration_cast<std::chrono::microseconds>(Profiler::default_profiler.measurements.at("optr").front().first).count() / 1000.0 << "ms\n"
+		<< "Prepare Time: " << Profiler::first("prep").value<double, std::milli>() << "ms\n"
+		<< "Execution Time: " << Profiler::first("optr").value<double, std::milli>() << "ms\n"
 		<< "Step Time:\n" 
 			<< "  min: " << std::chrono::duration_cast<std::chrono::microseconds>(std::get<0>(basic_analysis)).count() / 1000.0 << "ms\n"
 			<< "  max: " << std::chrono::duration_cast<std::chrono::microseconds>(std::get<1>(basic_analysis)).count() / 1000.0 << "ms\n"
 			<< "  avg: " << std::chrono::duration_cast<std::chrono::microseconds>(std::get<2>(basic_analysis)).count() / 1000.0 << "ms\n"
+		<< "Score: " << static_cast<double>(rounds) / Profiler::first("optr").value<double>()  << " RPS\n"
 		<< std::endl;
 	return EXIT_SUCCESS;
 }

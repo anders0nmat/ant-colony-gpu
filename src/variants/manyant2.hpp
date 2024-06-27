@@ -6,7 +6,7 @@
 #include "clcolony.hpp"
 #include "../profiler.hpp"
 
-class ManyAntOptimizer: public CLColonyOptimizer {
+class ManyAnt2Optimizer: public CLColonyOptimizer {
 protected:
 	cl::Program program;
 	cl::KernelFunctor<
@@ -51,10 +51,10 @@ protected:
 	}
 
 public:
-	static constexpr const char* static_name = "manyant";
+	static constexpr const char* static_name = "manyant2";
 	static constexpr const char* static_params = "";
 
-	ManyAntOptimizer(Problem problem, AntParams params)
+	ManyAnt2Optimizer(Problem problem, AntParams params)
 	:	CLColonyOptimizer::CLColonyOptimizer(problem, params),
 		advanceAntsCL(cl::Kernel()),
 		pheromone(problem.size(), params.initial_pheromone),
@@ -65,11 +65,21 @@ public:
 
 	void prepare() override {
 		setupCL(true);
-		program = loadProgram("./src/variants/manyant.cl");
+
+		const size_t matrix_size = problem.size() * problem.size();
+		const size_t required_buffer_size = matrix_size * (sizeof(cl_double) + sizeof(cl_int));
+		const size_t constant_buffer_size = device.getInfo<CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE>();
+		if (constant_buffer_size < required_buffer_size) {
+			std::cerr << "[OpenCL] Constant buffer size too small: "
+				<< constant_buffer_size << " (required: " << required_buffer_size << ")" << std::endl;
+			exit(EXIT_FAILURE);
+		}
+
+		program = loadProgram("./src/variants/manyant2.cl");
 
 		pheromone_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(double) * pheromone.adjacency_matrix.data.size());
-		visibility_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(double) * visibility.adjacency_matrix.data.size());
-		weights_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int) * problem.weights.adjacency_matrix.data.size());
+		visibility_d = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(double) * visibility.adjacency_matrix.data.size());
+		weights_d = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(int) * problem.weights.adjacency_matrix.data.size());
 		routes_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int) * problem.weights.adjacency_matrix.data.size());
 		routes_length_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int) * problem.size());
 		ant_sample_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(double) * problem.weights.adjacency_matrix.data.size());
@@ -175,7 +185,6 @@ public:
 			size_t best_ant_idx = std::distance(ant_route_lengths.begin(), best_ant_it);
 			queue.enqueueReadBuffer(routes_d, CL_TRUE, best_ant_idx * problem.size() * sizeof(int), sizeof(int) * problem.size(), ant_route.data());
 			best_route_length = std::min(*best_ant_it, best_route_length);
-			
 
 			for (auto& value : pheromone.adjacency_matrix.data) {
 				value *= (1.0 - params.rho);

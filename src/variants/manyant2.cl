@@ -1,4 +1,3 @@
-
 uint rng_minstd_rand0(uint* state) {
 	const uint a = 16807;
 	const uint c = 0;
@@ -17,8 +16,8 @@ double rng_range(uint* state, double max) {
 
 void kernel wander_ant(
 global const double* pheromone,
-global const double* visibility,
-global const int* weights,
+constant const double* visibility,
+constant const int* weights,
 global int* ant_routes,
 global int* ant_route_length,
 global double* ant_sample,
@@ -47,7 +46,7 @@ global uint* rng_seeds) {
 				powr(
 					pheromone[current_node * problem_size + next],
 					alpha
-				) * visibility[current_node * problem_size + next];	
+				) * visibility[current_node * problem_size + next];
 			sample[next] = edge_value;
 			sample_sum += edge_value;
 

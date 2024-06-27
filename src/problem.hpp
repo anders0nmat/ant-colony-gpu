@@ -85,5 +85,9 @@ public:
 	size_t size() const {
 		return weights.size();	
 	}
+
+	size_t sizeSqr() const {
+		return size() * size();
+	}
 };
 

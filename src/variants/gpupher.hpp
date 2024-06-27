@@ -6,7 +6,7 @@
 #include "clcolony.hpp"
 #include "../profiler.hpp"
 
-class ManyAntOptimizer: public CLColonyOptimizer {
+class GpuPherOptimizer: public CLColonyOptimizer {
 protected:
 	cl::Program program;
 	cl::KernelFunctor<
@@ -22,6 +22,22 @@ protected:
 		cl::Buffer  // rng_seeds
 	> advanceAntsCL;
 
+	cl::KernelFunctor<
+		cl::Buffer, // pheromone
+		cl_double, // one_minus_roh
+		cl_double, // min_pheromone
+		cl_double, // max_pheromone
+		cl::Buffer, // ant_routes
+		cl_uint, // best_ant_idx
+		cl_double, // best_ant_pheromone
+		cl_int  // problem_size
+	> updatePheromoneCL;
+
+	cl::KernelFunctor<
+		cl::Buffer, // allowed_template
+		cl::Buffer // allowed_data
+	> resetAllowedCL;
+
 	cl::Buffer pheromone_d;
 	cl::Buffer visibility_d;
 	cl::Buffer weights_d;
@@ -29,6 +45,7 @@ protected:
 	cl::Buffer routes_length_d;
 	cl::Buffer ant_sample_d;
 	cl::Buffer ant_allowed_d;
+	cl::Buffer ant_allowed_template_d;
 	cl::Buffer rng_seeds_d;
 
 	std::vector<int> allowed_data;
@@ -50,13 +67,39 @@ protected:
 		).wait();
 	}
 
+	void updatePheromone(uint best_ant, double spread) {
+		cl::NDRange global_size(problem.size() * problem.size());
+		updatePheromoneCL(
+			cl::EnqueueArgs(queue, global_size),
+			pheromone_d,
+			1 - params.rho,
+			params.min_pheromone,
+			params.max_pheromone,
+			routes_d,
+			best_ant,
+			spread,
+			problem.size()
+		).wait();
+	}
+
+	void resetAllowed() {
+		cl::NDRange global_size(problem.size() * problem.size());
+		resetAllowedCL(
+			cl::EnqueueArgs(queue, global_size),
+			ant_allowed_template_d,
+			ant_allowed_d
+		).wait();
+	}
+
 public:
-	static constexpr const char* static_name = "manyant";
+	static constexpr const char* static_name = "gpupher";
 	static constexpr const char* static_params = "";
 
-	ManyAntOptimizer(Problem problem, AntParams params)
+	GpuPherOptimizer(Problem problem, AntParams params)
 	:	CLColonyOptimizer::CLColonyOptimizer(problem, params),
 		advanceAntsCL(cl::Kernel()),
+		updatePheromoneCL(cl::Kernel()),
+		resetAllowedCL(cl::Kernel()),
 		pheromone(problem.size(), params.initial_pheromone),
 		visibility(problem.size()) {}
 
@@ -65,15 +108,16 @@ public:
 
 	void prepare() override {
 		setupCL(true);
-		program = loadProgram("./src/variants/manyant.cl");
+		program = loadProgram("./src/variants/gpupher.cl");
 
 		pheromone_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(double) * pheromone.adjacency_matrix.data.size());
-		visibility_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(double) * visibility.adjacency_matrix.data.size());
-		weights_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int) * problem.weights.adjacency_matrix.data.size());
+		visibility_d = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(double) * visibility.adjacency_matrix.data.size());
+		weights_d = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(int) * problem.weights.adjacency_matrix.data.size());
 		routes_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int) * problem.weights.adjacency_matrix.data.size());
 		routes_length_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int) * problem.size());
 		ant_sample_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(double) * problem.weights.adjacency_matrix.data.size());
 		ant_allowed_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int) * problem.weights.adjacency_matrix.data.size());
+		ant_allowed_template_d = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(int) * problem.weights.adjacency_matrix.data.size());
 		rng_seeds_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(uint) * problem.size());
 
 		std::transform(problem.weights.adjacency_matrix.data.cbegin(), problem.weights.adjacency_matrix.data.cend(),
@@ -131,8 +175,12 @@ public:
 			ant_sample_d, CL_FALSE, 0,
 			sizeof(double) * zero_doubles.size(),
 			zero_doubles.data());
-		queue.enqueueWriteBuffer(
+		/*queue.enqueueWriteBuffer(
 			ant_allowed_d, CL_FALSE, 0,
+			sizeof(int) * allowed_data.size(),
+			allowed_data.data());*/
+		queue.enqueueWriteBuffer(
+			ant_allowed_template_d, CL_FALSE, 0,
 			sizeof(int) * allowed_data.size(),
 			allowed_data.data());
 		std::vector<uint> rngs(problem.size());
@@ -158,11 +206,31 @@ public:
 			cl_double,  // alpha
 			cl::Buffer  // rng_seeds
 		>(cl::Kernel(program, "wander_ant"));
+
+		updatePheromoneCL = cl::KernelFunctor<
+			cl::Buffer, // pheromone
+			cl_double, // one_minus_roh
+			cl_double, // min_pheromone
+			cl_double, // max_pheromone
+			cl::Buffer, // ant_routes
+			cl_uint, // best_ant_idx
+			cl_double, // best_ant_pheromone
+			cl_int  // problem_size
+		>(cl::Kernel(program, "update_pheromone"));
+	
+		resetAllowedCL = cl::KernelFunctor<
+			cl::Buffer, // allowed_template
+			cl::Buffer  // allowed_data
+		>(cl::Kernel(program, "reset_allowed"));
+
+
+		resetAllowed();
 	}
 
 	void optimize(unsigned int rounds) override {
 		std::vector<int> ant_route_lengths(problem.size());
 		std::vector<int> ant_route(problem.size());
+		std::vector<int> ant_routes(problem.size() * problem.size());
 		while (rounds-- > 0) {
 			Profiler::start("opts");
 
@@ -170,40 +238,13 @@ public:
 			advanceAnts();
 
 			queue.enqueueReadBuffer(routes_length_d, CL_TRUE, 0, sizeof(int) * ant_route_lengths.size(), ant_route_lengths.data());
-			//l::copy(queue, routes_length_d, ant_route_lengths.begin(), ant_route_lengths.end());
 			auto best_ant_it = std::min_element(ant_route_lengths.begin(), ant_route_lengths.end());
 			size_t best_ant_idx = std::distance(ant_route_lengths.begin(), best_ant_it);
 			queue.enqueueReadBuffer(routes_d, CL_TRUE, best_ant_idx * problem.size() * sizeof(int), sizeof(int) * problem.size(), ant_route.data());
 			best_route_length = std::min(*best_ant_it, best_route_length);
-			
 
-			for (auto& value : pheromone.adjacency_matrix.data) {
-				value *= (1.0 - params.rho);
-			}
-
-			// Lay pheromone along the route of the best ant
-			
-			if (*best_ant_it < std::numeric_limits<int>::max()) {
-				double spread = params.q / *best_ant_it;
-				for (auto it = std::next(ant_route.begin()); it != ant_route.end(); it++) {
-					auto prev = std::prev(it);
-					pheromone.edge(*prev, *it) += spread;
-				}
-			}
-		
-			// clamp all pheromone values
-			for (auto& value : pheromone.adjacency_matrix.data) {
-				value = std::clamp(value, params.min_pheromone, params.max_pheromone);
-			}
-
-			queue.enqueueWriteBuffer(
-				pheromone_d, CL_TRUE, 0,
-				sizeof(double) * pheromone.adjacency_matrix.data.size(),
-				pheromone.adjacency_matrix.data.data());
-			queue.enqueueWriteBuffer(
-				ant_allowed_d, CL_TRUE, 0,
-				sizeof(int) * allowed_data.size(),
-				allowed_data.data());
+			updatePheromone(best_ant_idx, params.q / *best_ant_it);
+			resetAllowed();
 
 			Profiler::stop("opts");
 		}

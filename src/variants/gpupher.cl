@@ -17,7 +17,7 @@ double rng_range(uint* state, double max) {
 
 void kernel wander_ant(
 global const double* pheromone,
-global const double* visibility,
+global double* visibility,
 global const int* weights,
 global int* ant_routes,
 global int* ant_route_length,
@@ -27,6 +27,7 @@ int problem_size,
 double alpha,
 global uint* rng_seeds) {
 	int ant_idx = get_global_id(0);
+
 	int* ant_route = ant_routes + ant_idx * problem_size;
 	double* sample = ant_sample + ant_idx * problem_size;
 	int* allowed = ant_allowed + ant_idx * problem_size;
@@ -47,7 +48,7 @@ global uint* rng_seeds) {
 				powr(
 					pheromone[current_node * problem_size + next],
 					alpha
-				) * visibility[current_node * problem_size + next];	
+				) * visibility[current_node * problem_size + next];
 			sample[next] = edge_value;
 			sample_sum += edge_value;
 
@@ -91,3 +92,51 @@ global uint* rng_seeds) {
 		*route_length = INT_MAX;
 	}
 }
+
+
+void kernel update_pheromone(
+global double* pheromone,
+double one_minus_roh,
+double min_pheromone,
+double max_pheromone,
+global const int* ant_routes,
+uint best_ant_idx,
+double best_ant_pheromone,
+int problem_size
+) {
+	int edge = get_global_id(0);
+	int from = edge / problem_size;
+	int to = edge % problem_size;
+	const int* best_ant_route = ant_routes + best_ant_idx * problem_size;
+
+	// Evaporate
+	pheromone[edge] *= one_minus_roh;
+
+	// Lay along best_ant
+	for (int i = 0; i < problem_size; i++) {
+		if (best_ant_route[i] != from) {
+			continue;
+		}
+
+		if (i + 1 >= problem_size) {
+			 continue;
+		}
+
+		if (best_ant_route[i + 1] != to) {
+			continue;
+		}
+
+		pheromone[edge] += best_ant_pheromone;
+	}
+
+	pheromone[edge] = clamp(pheromone[edge], min_pheromone, max_pheromone);	
+}
+
+void kernel reset_allowed(
+constant const int* allowed_template,
+global int* allowed_data
+) {
+	int id = get_global_id(0);
+	allowed_data[id] = allowed_template[id];
+}
+

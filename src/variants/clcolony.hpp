@@ -7,9 +7,16 @@
 
 class CLColonyOptimizer: public AntOptimizer {
 protected:
-	std::string loadFile(std::filesystem::path path) {
+	std::string loadFileString(std::filesystem::path path) {
 		std::ifstream file(path);
 		return std::string(
+			std::istreambuf_iterator<char>(file),
+			std::istreambuf_iterator<char>());
+	}
+
+	std::vector<char> loadFileBinary(std::filesystem::path path) {
+		std::ifstream file(path, std::ios::binary);
+		return std::vector<char>(
 			std::istreambuf_iterator<char>(file),
 			std::istreambuf_iterator<char>());
 	}
@@ -47,19 +54,65 @@ protected:
 		queue = cl::CommandQueue(context, device);
 	}
 
-	cl::Program loadProgram(std::filesystem::path path) {
-		std::string program_source = loadFile(path);
+	cl::Program loadBinaryProgram(std::filesystem::path path) {
+		std::vector<char> program_binary = loadFileBinary(path);
+		cl::Program program(context, program_binary);
+
+		cl_int succ = program.build();
+		if (succ != CL_SUCCESS) {
+			std::cerr
+				<< "[OpenCL] Error creating program " << path.filename() << ": "
+				<< "(" << succ << ")"
+				<< "\n";
+			exit(EXIT_FAILURE);
+		}
+
+		succ = program.build();
+		if (succ != CL_SUCCESS) {
+			std::cerr
+				<< "[OpenCL] Error building program " << path.filename() << ": "
+				<< "(" << succ << ") "
+				<< program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device) << "\n";
+			exit(EXIT_FAILURE);
+		}
+		return program;		
+	}
+
+	cl::Program loadTextProgram(std::filesystem::path path) {
+		std::string program_source = loadFileString(path);
 		cl::Program program(context, program_source);
 		std::filesystem::path location = path;
 		location.remove_filename();
 
-		if (program.build("-I \"" + location.string() + "\"") != CL_SUCCESS) {
+		cl_int succ = program.build("-I \"" + location.string() + "\"");
+		if (succ != CL_SUCCESS) {
 			std::cerr
-				<< "[OpenCL] Error building program \"" << path.filename() << "\":"
+				<< "[OpenCL] Error building program " << path.filename() << ": "
+				<< "(" << succ << ") "
 				<< program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device) << "\n";
 			exit(EXIT_FAILURE);
 		}
+		
 		return program;
+	}
+
+	bool is_spirv_file(std::filesystem::path path) {
+		std::ifstream file(path, std::ios::binary);
+		union {
+			char bytes[4];
+			uint32_t number;
+		} magic_number;
+		file.read(&magic_number.bytes[0], 4);
+		return magic_number.number == 0x07230203 || magic_number.number == 0x03022307;	
+	}
+
+	cl::Program loadProgram(std::filesystem::path path) {
+		if (is_spirv_file(path)) {
+			return loadBinaryProgram(path);
+		}
+		else {
+			return loadTextProgram(path);
+		}
 	}
 
 	cl::Device device;
