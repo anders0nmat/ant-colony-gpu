@@ -6,7 +6,7 @@
 #include "clcolony.hpp"
 #include "../profiler.hpp"
 
-class PherCompOptimizer: public CLColonyOptimizer {
+class BinSearchOptimizer: public CLColonyOptimizer {
 protected:
 	cl::Program program;
 	cl::KernelFunctor<
@@ -95,10 +95,10 @@ protected:
 	}
 
 public:
-	static constexpr const char* static_name = "phercomp";
+	static constexpr const char* static_name = "binsearch";
 	static constexpr const char* static_params = "";
 
-	PherCompOptimizer(Problem problem, AntParams params)
+	BinSearchOptimizer(Problem problem, AntParams params)
 	:	CLColonyOptimizer::CLColonyOptimizer(problem, params),
 		advanceAntsCL(cl::Kernel()),
 		updatePheromoneCL(cl::Kernel()),
@@ -111,7 +111,7 @@ public:
 
 	void prepare() override {
 		setupCL(true);
-		program = loadProgram("./src/variants/phercomp.cl");
+		program = loadProgram("./src/variants/binsearch.cl");
 
 		pheromone_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(double) * pheromone.adjacency_matrix.data.size());
 		visibility_d = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(double) * visibility.adjacency_matrix.data.size());

@@ -9,6 +9,7 @@
 #include "variants/manyant2.hpp"
 #include "variants/gpupher.hpp"
 #include "variants/phercomp.hpp"
+#include "variants/binsearch.hpp"
 
 
 Profiler Profiler::default_profiler;
@@ -21,6 +22,7 @@ int main(int argc, char* argv[]) {
 	ColonyFactory::add<ManyAnt2Optimizer>();
 	ColonyFactory::add<GpuPherOptimizer>();
 	ColonyFactory::add<PherCompOptimizer>();
+	ColonyFactory::add<BinSearchOptimizer>();
 
 	cli.addFlag("help", "Prints this help message", {"h"});
 	cli.addFlag("list", "List all optimization variants available", {"l"});
@@ -104,7 +106,7 @@ int main(int argc, char* argv[]) {
 	optimizer->optimize(rounds);
 	Profiler::stop("optr");
 
-	auto basic_analysis = Profiler::default_profiler.get_minmaxavg("opts");
+	auto basic_analysis = Profiler::analyze("opts");
 	std::cout
 		<< "Finished!\n"
 		<< "Variant: " << colonyIdentifier << (colonyArguments.empty() ? "" : ":" + colonyArguments) << "\n"
@@ -112,9 +114,20 @@ int main(int argc, char* argv[]) {
 		<< "Prepare Time: " << Profiler::first("prep").value<double, std::milli>() << "ms\n"
 		<< "Execution Time: " << Profiler::first("optr").value<double, std::milli>() << "ms\n"
 		<< "Step Time:\n" 
-			<< "  min: " << std::chrono::duration_cast<std::chrono::microseconds>(std::get<0>(basic_analysis)).count() / 1000.0 << "ms\n"
-			<< "  max: " << std::chrono::duration_cast<std::chrono::microseconds>(std::get<1>(basic_analysis)).count() / 1000.0 << "ms\n"
-			<< "  avg: " << std::chrono::duration_cast<std::chrono::microseconds>(std::get<2>(basic_analysis)).count() / 1000.0 << "ms\n"
+			<< "  min: " << basic_analysis.min.value<double, std::milli>() << "ms\n"
+			<< "  max: " << basic_analysis.max.value<double, std::milli>() << "ms\n"
+			<< "  avg: " << basic_analysis.avg.value<double, std::milli>() << "ms\n";
+		
+	for (const auto& id : Profiler::measurement_keys()) {
+		auto analysis = Profiler::analyze(id);
+		std::cout
+			<< "Measurement '" << id << "':\n"
+			<< "  min: " << analysis.min.value<double, std::milli>() << "ms\n"
+			<< "  max: " << analysis.max.value<double, std::milli>() << "ms\n"
+			<< "  avg: " << analysis.avg.value<double, std::milli>() << "ms\n";
+	}
+
+	std::cout
 		<< "Score: " << static_cast<double>(rounds) / Profiler::first("optr").value<double>()  << " RPS\n"
 		<< std::endl;
 	return EXIT_SUCCESS;
