@@ -1,4 +1,12 @@
 
+#if defined(__opencl_c_int64) && !defined(FORCE_32BITMASK)
+typedef ulong bitmask;
+const uint BITMASK_SIZE = 64;
+#else
+typedef uint bitmask;
+const uint BITMASK_SIZE = 32;
+#endif
+
 uint rng_minstd_rand0(uint* state) {
 	const uint a = 16807;
 	const uint c = 0;
@@ -15,20 +23,49 @@ double rng_range(uint* state, double max) {
 	return dr * max;
 }
 
+inline void reset_bit(bitmask* mask, uint index) {
+	uint mask_idx = index / BITMASK_SIZE;
+	uint bit_idx = index % BITMASK_SIZE;
+
+	mask[mask_idx] &= ~(1UL << bit_idx);
+}
+
+inline bool has_bit(bitmask* mask, uint index) {
+	uint mask_idx = index / BITMASK_SIZE;
+	uint bit_idx = index % BITMASK_SIZE;
+
+	return (mask[mask_idx] & (1UL << bit_idx)) != 0;
+}
+
+/*
+	Returns whether both bitsets have overlapping ones
+*/
+inline bool and_bit_reduce(const bitmask* a, const bitmask* b, uint size) {
+	bitmask agg = 0;
+	for (uint i = 0; i < size; i++) {
+		agg |= a[i] & b[i];
+	}
+	return agg != 0;
+}
+
 void kernel wander_ant(
 global const double* probabilities,
 global const int* weights,
+global const bitmask* dependencies,
+global bitmask* ant_need_visit,
 global int* ant_routes,
 global int* ant_route_length,
 global double* ant_sample,
-global int* ant_allowed,
 int problem_size,
 global uint* rng_seeds) {
+	const int bitmask_size = problem_size / BITMASK_SIZE + (problem_size % BITMASK_SIZE != 0 ? 1 : 0);
+
 	int ant_idx = get_global_id(0);
 
 	int* ant_route = ant_routes + ant_idx * problem_size;
 	double* sample = ant_sample + ant_idx * problem_size;
-	int* allowed = ant_allowed + ant_idx * problem_size;
+	bitmask* need_visit = ant_need_visit + bitmask_size * ant_idx;
+	reset_bit(need_visit, 0);
 	uint* seed = rng_seeds + ant_idx;
 
 	int current_node = 0;
@@ -36,25 +73,12 @@ global uint* rng_seeds) {
 	*route_length = 0;
 	for (int i = 1; i < problem_size; i++) {
 		double sample_sum = 0.0;
-		/*
-		? Two bitsets:
-		? 	visited[node] => Use the inverse (has_to_be_visited) instead, better for later calculation
-		? 	dependencies[node][node]
-		? Then, Update would be obsolete, because only update needed is visited[next_node] = true
-		? Check for allowed[next_node] would be
-		? 	!visited[next_node] for already visited nodes
-		? 	OR has_to_be_visited[next_node]
-		? 	dependencies[next_node] & ~visited == 0 for satisfying all dependencies
-		? 	dependent: 1001
-		? 	visited:   1000
-		? 	~visited:  0111 = 0001 != 0
-		? 	visited:   1100
-		? 	~visited:  0011 = 0001 != 0
-		? 	visited:   1101
-		? 	~visited:  0010 = 0000 == 0
-		*/
 		for (size_t next = 0; next < problem_size; next++) {
-			sample_sum += allowed[next] == 0 ? probabilities[current_node * problem_size + next] : 0;
+			bool valid = 
+				has_bit(need_visit, next)
+				&& !and_bit_reduce(need_visit, dependencies + bitmask_size * next, bitmask_size);
+
+			sample_sum += valid ? probabilities[current_node * problem_size + next] : 0;
 			sample[next] = sample_sum;
 		}
 
@@ -68,10 +92,6 @@ global uint* rng_seeds) {
 		int idx_max = problem_size - 1;
 		while (idx_min < idx_max - 1) {
 			int idx_mid = (idx_min + idx_max) / 2;
-			// Eliminating the if's has no noticable effect on performance
-			//idx_min = sample[idx_mid] < rng ? idx_mid : idx_min;
-			//idx_max = sample[idx_mid] >= rng ? idx_mid : idx_max;
-
 			if (sample[idx_mid] < rng) {
 				idx_min = idx_mid;
 			}
@@ -91,33 +111,7 @@ global uint* rng_seeds) {
 
 		current_node = next_node;
 		ant_route[i] = next_node;
-		allowed[next_node] = -1;
-
-		//? Bitmask representing dependent nodes
-		/*
-		? uint dependent_bitmasks[];
-		? uint length = length(dependent_bitmask);
-		? uint bitidx = 0;
-		? uint bitmask = dependent[bitindex];
-		? while true {
-		? 	uint first_nonzero = clz(bitmask);
-		? 	if first_nonzero == sizeof(uint)*8 {
-		? 		bitidx++;
-		? 		if bitidx >= length { break }
-		? 		bitmask = dependent[bitidx]
-		? 	}
-		? 	else {
-		? 		allowed[first_nonzero + sizeof(uint)*8*bitidx] -= 1;
-		? 		bitmask &= ~(1 << (sizeof(uint)*8 - first_nonzero));
-		? 	}
-		? }
-		*/
-
-		for (int i = 0; i < problem_size; i++) {
-			if (weights[i * problem_size + next_node] == -1) {
-				allowed[i] -= 1;
-			}
-		}
+		reset_bit(need_visit, next_node);
 	}
 
 	if (current_node != problem_size - 1) {
@@ -186,11 +180,8 @@ int problem_size
 	probabilities[edge] = powr(pheromone[edge], alpha) * visibility[edge];
 }
 
-void kernel reset_allowed(
-constant const int* allowed_template,
-global int* allowed_data
-) {
+void kernel reset_ant_need_visit(global bitmask* ant_need_visit) {
 	int id = get_global_id(0);
-	allowed_data[id] = allowed_template[id];
+	ant_need_visit[id] = ~((bitmask)0);
 }
 

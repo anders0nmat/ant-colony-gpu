@@ -35,7 +35,6 @@ int problem_size,
 global uint* rng_seeds) {
 	int ant_idx = get_global_id(0);
 
-
 	int* ant_route = ant_routes + ant_idx * problem_size;
 	double* sample = ant_sample + ant_idx * problem_size;
 	int* allowed = ant_allowed + ant_idx * problem_size;

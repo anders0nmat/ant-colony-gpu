@@ -11,6 +11,7 @@
 #include "variants/phercomp.hpp"
 #include "variants/binsearch.hpp"
 #include "variants/depmask.hpp"
+#include "variants/samplemask.hpp"
 
 
 Profiler Profiler::default_profiler;
@@ -25,6 +26,7 @@ int main(int argc, char* argv[]) {
 	ColonyFactory::add<PherCompOptimizer>();
 	ColonyFactory::add<BinSearchOptimizer>();
 	ColonyFactory::add<DepMaskOptimizer>();
+	ColonyFactory::add<SampleMaskOptimizer>();
 
 	cli.addFlag("help", "Prints this help message", {"h"});
 	cli.addFlag("list", "List all optimization variants available", {"l"});
