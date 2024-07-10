@@ -16,6 +16,7 @@
 #include "variants/parant2.hpp"
 #include "variants/parant3.hpp"
 #include "variants/parant4.hpp"
+#include "variants/localant.hpp"
 
 
 Profiler Profiler::default_profiler;
@@ -35,6 +36,7 @@ int main(int argc, char* argv[]) {
 	ColonyFactory::add<ParAnt2Optimizer>();
 	ColonyFactory::add<ParAnt3Optimizer>();
 	ColonyFactory::add<ParAnt4Optimizer>();
+	ColonyFactory::add<LocalAntOptimizer>();
 
 	cli.addFlag("help", "Prints this help message", {"h"});
 	cli.addFlag("list", "List all optimization variants available", {"l"});

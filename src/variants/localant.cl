@@ -50,8 +50,9 @@ global const int* weights,
 global const bitmask* dependencies,
 global int* ant_routes,
 global int* ant_route_length,
-global double* ant_sample,
-global int* ant_allowed,
+local double* ant_sample,
+local int* ant_allowed,
+global const int* ant_allowed_template,
 int problem_size,
 global uint* rng_seeds) {
 	int ant_idx = get_group_id(1);
@@ -60,13 +61,14 @@ global uint* rng_seeds) {
 	int clipped_idx = min(worker_idx, problem_size - 1);
 
 	int* ant_route = ant_routes + ant_idx * problem_size;
-	double* sample = ant_sample + ant_idx * worker_size;
-	int* allowed = ant_allowed + ant_idx * problem_size;
+	double* sample = ant_sample;
+	int* allowed = ant_allowed;
 	uint* seed = rng_seeds + ant_idx;
 	const int bitmask_size = problem_size / BITMASK_SIZE + (problem_size % BITMASK_SIZE != 0 ? 1 : 0);
 
 	double* worker_sample = sample + worker_idx;
 	int* worker_allowed = allowed + worker_idx;
+	int route_length = 0;
 
 	const int worker_pwr = ctz(~worker_idx);
 	const int max_pwr = ctz(worker_size) + 1;
@@ -79,8 +81,9 @@ global uint* rng_seeds) {
 		rng = 0.0;
 		next_node = -1;
 	}
-	int* route_length = ant_route_length + ant_idx;
-	*route_length = 0;
+	if (worker_idx < problem_size) {
+		allowed[worker_idx] = ant_allowed_template[worker_idx];
+	}
 	for (int i = 1; i < problem_size; i++) {
 		barrier(CLK_LOCAL_MEM_FENCE);
 		sample[worker_idx] = allowed[clipped_idx] == 0 ? probabilities[current_node * problem_size + clipped_idx] : 0;
@@ -111,6 +114,7 @@ global uint* rng_seeds) {
 		}
 		barrier(CLK_LOCAL_MEM_FENCE);
 		sample[worker_idx] += my_sample; // Make exclusive scan into inclusive one
+		
 		if (worker_idx == problem_size - 1) {
 			rng = rng_range(seed, sample[worker_idx]);
 			next_node = -1;
@@ -131,7 +135,7 @@ global uint* rng_seeds) {
 			}
 
 			if (!stuck_flag) {
-				*route_length += weights[current_node * problem_size + next_node];
+				route_length += weights[current_node * problem_size + next_node];
 
 				current_node = next_node;
 				ant_route[i] = next_node;
@@ -147,8 +151,8 @@ global uint* rng_seeds) {
 		}
 	}
 
-	if (worker_idx == 0 && current_node != problem_size - 1) {
-		*route_length = INT_MAX;
+	if (worker_idx == 0) {
+		ant_route_length[ant_idx] = (current_node == problem_size - 1) ? route_length : INT_MAX;
 	}
 }
 
@@ -211,13 +215,5 @@ int problem_size
 	pheromone[edge] = clamp(pheromone[edge], min_pheromone, max_pheromone);
 
 	probabilities[edge] = powr(pheromone[edge], alpha) * visibility[edge];
-}
-
-void kernel reset_allowed(
-constant const int* allowed_template,
-global int* allowed_data
-) {
-	int id = get_global_id(0);
-	allowed_data[id] = allowed_template[id];
 }
 
