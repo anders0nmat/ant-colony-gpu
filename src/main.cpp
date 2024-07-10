@@ -17,6 +17,8 @@
 #include "variants/parant3.hpp"
 #include "variants/parant4.hpp"
 #include "variants/localant.hpp"
+#include "variants/neighbor.hpp"
+#include "variants/gpumax.hpp"
 
 
 Profiler Profiler::default_profiler;
@@ -37,6 +39,8 @@ int main(int argc, char* argv[]) {
 	ColonyFactory::add<ParAnt3Optimizer>();
 	ColonyFactory::add<ParAnt4Optimizer>();
 	ColonyFactory::add<LocalAntOptimizer>();
+	ColonyFactory::add<NeighborOptimizer>();
+	ColonyFactory::add<GpuMaxOptimizer>();
 
 	cli.addFlag("help", "Prints this help message", {"h"});
 	cli.addFlag("list", "List all optimization variants available", {"l"});
