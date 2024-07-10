@@ -1,12 +1,4 @@
 
-#if defined(__opencl_c_int64) && !defined(FORCE_32BITMASK)
-typedef ulong bitmask;
-const uint BITMASK_SIZE = 64;
-#else
-typedef uint bitmask;
-const uint BITMASK_SIZE = 32;
-#endif
-
 uint rng_minstd_rand0(uint* state) {
 	const uint a = 16807;
 	const uint c = 0;
@@ -22,6 +14,14 @@ double rng_range(uint* state, double max) {
 	double dr = (double)r / (double)UINT_MAX;
 	return dr * max;
 }
+
+#if defined(__opencl_c_int64) && !defined(FORCE_32BITMASK)
+typedef ulong bitmask;
+const uint BITMASK_SIZE = 64;
+#else
+typedef uint bitmask;
+const uint BITMASK_SIZE = 32;
+#endif
 
 inline void reset_bit(bitmask* mask, uint index) {
 	uint mask_idx = index / BITMASK_SIZE;
@@ -44,84 +44,99 @@ inline bool has_bit(const bitmask* mask, uint index) {
 	return (mask[mask_idx] & (1UL << bit_idx)) != 0;
 }
 
-/*
-	Returns whether both bitsets have overlapping ones
-*/
-inline bool and_bit_reduce(const bitmask* a, const bitmask* b, uint size) {
-	bitmask agg = 0;
-	for (uint i = 0; i < size; i++) {
-		agg |= a[i] & b[i];
-	}
-	return agg != 0;
-}
-
 void kernel wander_ant(
 global const double* probabilities,
 global const int* weights,
 global const bitmask* dependencies,
-global bitmask* ant_need_visit,
 global int* ant_routes,
 global int* ant_route_length,
 global double* ant_sample,
+global int* ant_allowed,
 int problem_size,
 global uint* rng_seeds) {
-	const int bitmask_size = problem_size / BITMASK_SIZE + (problem_size % BITMASK_SIZE != 0 ? 1 : 0);
-
-	int ant_idx = get_global_id(0);
+	//int ant_idx = get_global_id(0);
+	int ant_idx = get_group_id(1);
+	int worker_idx = get_local_id(0);
 
 	int* ant_route = ant_routes + ant_idx * problem_size;
 	double* sample = ant_sample + ant_idx * problem_size;
-	bitmask* need_visit = ant_need_visit + bitmask_size * ant_idx;
-	reset_bit(need_visit, 0);
+	int* allowed = ant_allowed + ant_idx * problem_size;
 	uint* seed = rng_seeds + ant_idx;
+	const int bitmask_size = problem_size / BITMASK_SIZE + (problem_size % BITMASK_SIZE != 0 ? 1 : 0);
 
-	int current_node = 0;
+	double* worker_sample = sample + worker_idx;
+	int* worker_allowed = allowed + worker_idx;
+
+
+	local int current_node;
+	if (worker_idx == 0) {
+		current_node = 0;
+	}
 	int* route_length = ant_route_length + ant_idx;
 	*route_length = 0;
 	for (int i = 1; i < problem_size; i++) {
-		double sample_sum = 0.0;
-		for (size_t next = 0; next < problem_size; next++) {
-			bool valid = 
-				has_bit(need_visit, next)
-				&& !and_bit_reduce(need_visit, dependencies + bitmask_size * next, bitmask_size);
+		barrier(CLK_LOCAL_MEM_FENCE);
+		sample[worker_idx] = allowed[worker_idx] == 0 ? probabilities[current_node * problem_size + worker_idx] : 0;
+		barrier(CLK_LOCAL_MEM_FENCE);
 
-			sample_sum += valid ? probabilities[current_node * problem_size + next] : 0;
-			sample[next] = sample_sum;
-		}
-
-		if (sample_sum == 0) {
-			current_node = -1;
-			break;
-		}
-
-		double rng = rng_range(seed, sample_sum);
-		int idx_min = 0;
-		int idx_max = problem_size - 1;
-		while (idx_min < idx_max - 1) {
-			int idx_mid = (idx_min + idx_max) / 2;
-			if (sample[idx_mid] < rng) {
-				idx_min = idx_mid;
+		if (worker_idx == 0) {
+			double sample_sum = 0;
+			// Prefix Sum
+			for (int ii = 0; ii < problem_size; ii++) {
+				sample_sum += sample[ii];
+				sample[ii] = sample_sum;
 			}
-			else if (sample[idx_mid] >= rng) {
-				idx_max = idx_mid;
+
+			if (sample_sum == 0) {
+				current_node = -1;
+				break;
+			}
+
+			double rng = rng_range(seed, sample_sum);
+			int idx_min = 0;
+			int idx_max = problem_size - 1;
+			while (idx_min < idx_max - 1) {
+				int idx_mid = (idx_min + idx_max) / 2;
+				if (sample[idx_mid] < rng) {
+					idx_min = idx_mid;
+				}
+				else if (sample[idx_mid] >= rng) {
+					idx_max = idx_mid;
+				}
+			}
+
+			int next_node = idx_max;
+
+			if (next_node < 0) {
+				current_node = -1;
+				break;
+			}
+
+			*route_length += weights[current_node * problem_size + next_node];
+
+			current_node = next_node;
+			ant_route[i] = next_node;
+			allowed[next_node] = -1;
+
+			const bitmask* dep_mask = dependencies + next_node * bitmask_size;
+			uint bitidx = 0;
+			bitmask mask = dep_mask[bitidx];
+			while (true) {
+				uint first_nonzero = ctz(mask);
+				if (first_nonzero == BITMASK_SIZE) {
+					bitidx++;
+					if (bitidx >= bitmask_size) { break; }
+					mask = dep_mask[bitidx];
+				}
+				else {
+					allowed[first_nonzero + BITMASK_SIZE * bitidx] -= 1;
+					mask &= ~(1UL << first_nonzero);
+				}
 			}
 		}
-
-		int next_node = idx_max;
-
-		if (next_node < 0) {
-			current_node = -1;
-			break;
-		}
-
-		*route_length += weights[current_node * problem_size + next_node];
-
-		current_node = next_node;
-		ant_route[i] = next_node;
-		reset_bit(need_visit, next_node);
 	}
 
-	if (current_node != problem_size - 1) {
+	if (worker_idx == 0 && current_node != problem_size - 1) {
 		*route_length = INT_MAX;
 	}
 }
@@ -187,8 +202,11 @@ int problem_size
 	probabilities[edge] = powr(pheromone[edge], alpha) * visibility[edge];
 }
 
-void kernel reset_ant_need_visit(global bitmask* ant_need_visit) {
+void kernel reset_allowed(
+constant const int* allowed_template,
+global int* allowed_data
+) {
 	int id = get_global_id(0);
-	ant_need_visit[id] = ~((bitmask)0);
+	allowed_data[id] = allowed_template[id];
 }
 

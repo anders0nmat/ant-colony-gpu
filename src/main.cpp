@@ -12,6 +12,9 @@
 #include "variants/binsearch.hpp"
 #include "variants/depmask.hpp"
 #include "variants/samplemask.hpp"
+#include "variants/parant.hpp"
+#include "variants/parant2.hpp"
+#include "variants/parant3.hpp"
 
 
 Profiler Profiler::default_profiler;
@@ -27,6 +30,9 @@ int main(int argc, char* argv[]) {
 	ColonyFactory::add<BinSearchOptimizer>();
 	ColonyFactory::add<DepMaskOptimizer>();
 	ColonyFactory::add<SampleMaskOptimizer>();
+	ColonyFactory::add<ParAntOptimizer>();
+	ColonyFactory::add<ParAnt2Optimizer>();
+	ColonyFactory::add<ParAnt3Optimizer>();
 
 	cli.addFlag("help", "Prints this help message", {"h"});
 	cli.addFlag("list", "List all optimization variants available", {"l"});
