@@ -190,6 +190,7 @@ int problem_size
 
 void kernel get_best_ant(
 global int* ant_route_length,
+global int* best_length,
 double pheromone,
 int problem_size
 ) {
@@ -204,4 +205,5 @@ int problem_size
 
 	best_ant_idx = best_idx;
 	best_ant_pheromone = pheromone / best_len;
+	*best_length = min(*best_length, best_len);
 }

@@ -31,7 +31,7 @@ protected:
 	cl::Buffer ant_allowed_d;
 	cl::Buffer rng_seeds_d;
 
-	std::vector<int> allowed_data;
+	Graph<int> allowed_data;
 
 	void advanceAnts() {
 		cl::NDRange global_size(problem.size());
@@ -57,11 +57,9 @@ public:
 	ManyAnt2Optimizer(Problem problem, AntParams params)
 	:	CLColonyOptimizer::CLColonyOptimizer(problem, params),
 		advanceAntsCL(cl::Kernel()),
-		pheromone(problem.size(), params.initial_pheromone),
-		visibility(problem.size()) {}
+		pheromone(problem.size(), params.initial_pheromone) {}
 
 	Graph<double> pheromone;
-	Graph<double> visibility;
 
 	void prepare() override {
 		setupCL(true);
@@ -75,99 +73,26 @@ public:
 			exit(EXIT_FAILURE);
 		}
 
-		program = loadProgram("./src/variants/manyant2.cl");
+		program = loadProgramVariant(static_name);
 
-		pheromone_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(double) * pheromone.adjacency_matrix.data.size());
-		visibility_d = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(double) * visibility.adjacency_matrix.data.size());
-		weights_d = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(int) * problem.weights.adjacency_matrix.data.size());
-		routes_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int) * problem.weights.adjacency_matrix.data.size());
-		routes_length_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int) * problem.size());
-		ant_sample_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(double) * problem.weights.adjacency_matrix.data.size());
-		ant_allowed_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int) * problem.weights.adjacency_matrix.data.size());
-		rng_seeds_d = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(uint) * problem.size());
+		pheromone_d = createAndFillBuffer(problem.sizeSqr(), false, pheromone);
+		weights_d = createAndFillBuffer(problem.sizeSqr(), true, problem.weights);
+		routes_d = createAndFillBuffer<int>(problem.sizeSqr(), false, 0);
+		routes_length_d = createAndFillBuffer(problem.size(), false, std::numeric_limits<cl_int>::max());
+		ant_sample_d = createAndFillBuffer<double>(problem.sizeSqr(), false, 0.0);
 
-		std::transform(problem.weights.adjacency_matrix.data.cbegin(), problem.weights.adjacency_matrix.data.cend(),
-			visibility.adjacency_matrix.data.begin(), [this](const int& w) {
-				double visibility = 1.0 / std::max(params.zero_weight, static_cast<double>(w));
-				return std::pow(visibility, params.beta);
-			} );
+		Graph<double> visibility = getVisibility();
+		visibility_d = createAndFillBuffer(problem.sizeSqr(), true, visibility);
 
-		std::vector<int> allowed_prototype(problem.size(), 0);
-		for (int i = 0; i < problem.dependencies.adjacency_matrix.dimension; i++) {
-			int acc = 0;
-			for (int j = 0; j < problem.dependencies.adjacency_matrix.dimension; j++) {
-				if (problem.dependencies.edge(i, j)) {
-					acc++;
-				}
-			}
-			allowed_prototype.at(i) = acc;
-		}
-		for (size_t from = 0; from < problem.size(); from++) {
-			if (problem.dependencies.edge(from, 0)) {
-				allowed_prototype.at(from) -= 1;
-			}
-		}
-		allowed_prototype.at(0) = -1;
-		allowed_data.resize(problem.size() * problem.size(), 0);
-		for (int i = 0; i < allowed_data.size(); i++) {
-			allowed_data.at(i) = allowed_prototype.at(i % allowed_prototype.size());
-		}
+		allowed_data = getAllowedData();
+		ant_allowed_d = createAndFillBuffer(problem.sizeSqr(), false, allowed_data);
 
-		queue.enqueueWriteBuffer(
-			pheromone_d, CL_FALSE, 0,
-			sizeof(double) * pheromone.adjacency_matrix.data.size(),
-			pheromone.adjacency_matrix.data.data());
-		queue.enqueueWriteBuffer(
-			visibility_d, CL_FALSE, 0,
-			sizeof(double) * visibility.adjacency_matrix.data.size(),
-			visibility.adjacency_matrix.data.data());
-		queue.enqueueWriteBuffer(
-			weights_d, CL_FALSE, 0,
-			sizeof(int) * problem.weights.adjacency_matrix.data.size(),
-			problem.weights.adjacency_matrix.data.data());
-		std::vector<int> zero_ints(problem.weights.adjacency_matrix.data.size(), 0);
-		std::vector<double> zero_doubles(problem.weights.adjacency_matrix.data.size(), 0.0);
-		queue.enqueueWriteBuffer(
-			routes_d, CL_FALSE, 0,
-			sizeof(int) * zero_ints.size(),
-			zero_ints.data());
-		std::fill(zero_ints.begin(), zero_ints.end(), std::numeric_limits<cl_int>::max());
-		queue.enqueueWriteBuffer(
-			routes_length_d, CL_FALSE, 0,
-			sizeof(int) * problem.size(),
-			zero_ints.data());
-		std::fill(zero_ints.begin(), zero_ints.end(), 0);
-		queue.enqueueWriteBuffer(
-			ant_sample_d, CL_FALSE, 0,
-			sizeof(double) * zero_doubles.size(),
-			zero_doubles.data());
-		queue.enqueueWriteBuffer(
-			ant_allowed_d, CL_FALSE, 0,
-			sizeof(int) * allowed_data.size(),
-			allowed_data.data());
-		std::vector<uint> rngs(problem.size());
-		std::minstd_rand0 rng(params.random_seed);
-		for (auto& i : rngs) {
-			i = rng();
-		}
-		queue.enqueueWriteBuffer(
-			rng_seeds_d, CL_FALSE, 0,
-			sizeof(uint) * rngs.size(),
-			rngs.data());
+		std::vector<uint> rngs = getRngs();
+		rng_seeds_d = createAndFillBuffer(problem.size(), false, rngs);
+
 		queue.finish();
 
-		advanceAntsCL = cl::KernelFunctor<
-			cl::Buffer, // pheromone
-			cl::Buffer, // visibility
-			cl::Buffer, // weights
-			cl::Buffer, // ant_routes
-			cl::Buffer, // ant_routes_length
-			cl::Buffer, // ant_sample
-			cl::Buffer, // ant_allowed
-			cl_int,     // problem_size
-			cl_double,  // alpha
-			cl::Buffer  // rng_seeds
-		>(cl::Kernel(program, "wander_ant"));
+		advanceAntsCL = decltype(advanceAntsCL)(cl::Kernel(program, "wander_ant"));
 	}
 
 	void optimize(unsigned int rounds) override {
@@ -212,7 +137,7 @@ public:
 			queue.enqueueWriteBuffer(
 				ant_allowed_d, CL_TRUE, 0,
 				sizeof(int) * allowed_data.size(),
-				allowed_data.data());
+				allowed_data.adjacency_matrix.data.data());
 
 			Profiler::stop("opts");
 		}
