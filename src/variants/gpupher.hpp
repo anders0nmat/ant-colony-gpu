@@ -103,7 +103,7 @@ public:
 	Graph<double> pheromone;
 
 	void prepare() override {
-		setupCL(true);
+		setupCL(false);
 		program = loadProgramVariant(static_name);
 
 		pheromone_d = createAndFillBuffer(problem.sizeSqr(), false, pheromone);
@@ -140,16 +140,22 @@ public:
 			Profiler::start("opts");
 
 			// TODO : Not 1:1 same rng as sequential because sequential reseeds rng every round
+			Profiler::start("adva");
 			advanceAnts();
+			Profiler::stop("adva");
 
+			Profiler::start("eval");
 			queue.enqueueReadBuffer(routes_length_d, CL_TRUE, 0, sizeof(int) * ant_route_lengths.size(), ant_route_lengths.data());
 			auto best_ant_it = std::min_element(ant_route_lengths.begin(), ant_route_lengths.end());
 			size_t best_ant_idx = std::distance(ant_route_lengths.begin(), best_ant_it);
 			queue.enqueueReadBuffer(routes_d, CL_TRUE, best_ant_idx * problem.size() * sizeof(int), sizeof(int) * problem.size(), ant_route.data());
 			best_route_length = std::min(*best_ant_it, best_route_length);
+			Profiler::stop("eval");
 
+			Profiler::start("upda");
 			updatePheromone(best_ant_idx, params.q / *best_ant_it);
 			resetAllowed();
+			Profiler::stop("upda");
 
 			Profiler::stop("opts");
 		}

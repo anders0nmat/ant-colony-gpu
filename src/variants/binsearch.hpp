@@ -106,7 +106,7 @@ public:
 	Graph<double> pheromone;
 
 	void prepare() override {
-		setupCL(true);
+		setupCL(false);
 		program = loadProgramVariant(static_name);
 
 		pheromone_d = createAndFillBuffer(problem.sizeSqr(), false, pheromone);

@@ -111,7 +111,7 @@ public:
 	bool forceInt32Bitmasks = false;
 
 	void prepare() override {
-		setupCL(true);
+		setupCL(false);
 		program = loadProgramVariant(static_name);
 
 		pheromone_d = createAndFillBuffer(problem.sizeSqr(), false, pheromone);

@@ -110,7 +110,7 @@ public:
 	bool forceInt32Bitmasks = false;
 
 	void prepare() override {
-		setupCL(true);
+		setupCL(false);
 		program = loadProgramVariant(static_name);
 
 		work_size = 1UL << leftmost_one(problem.size() - 1);

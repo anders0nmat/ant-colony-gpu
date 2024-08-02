@@ -25,6 +25,50 @@ Profiler Profiler::default_profiler;
 ColonyFactory::ColonyList ColonyFactory::variants;
 CliParameters cli;
 
+std::string print_now() {
+	auto current_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+	char now_str[std::size("2000-01-01T16:00:00")];
+	std::strftime(now_str, std::size(now_str), "%FT%T", std::gmtime(&current_time));
+	return std::string(now_str);
+}
+
+void output_profiler(
+std::filesystem::path path,
+bool append,
+std::string variant,
+std::string problem,
+unsigned int rounds) {
+	bool existed = std::filesystem::exists(path);
+	std::fstream file(path, std::fstream::in | std::fstream::out | (append ? std::fstream::app : std::fstream::trunc));
+
+	const char sep = ';';
+	if (!existed || !append) {
+		file 
+			<< "variant" << sep
+			<< "problem" << sep
+			<< "timestamp" << sep
+			<< "rounds" << sep
+			<< "prep" << sep
+			<< "optr" << sep
+			<< "opts" << sep
+			<< "adva" << sep
+			<< "eval" << sep
+			<< "upda" << "\n";
+	}
+
+	file 
+		<< variant << sep
+		<< problem << sep
+		<< print_now() << sep
+		<< rounds << sep
+		<< Profiler::first("prep").value<double, std::milli>() << sep
+		<< Profiler::first("optr").value<double, std::milli>() << sep
+		<< Profiler::analyze("opts").avg.value<double, std::milli>() << sep
+		<< Profiler::analyze("adva").avg.value<double, std::milli>() << sep
+		<< Profiler::analyze("eval").avg.value<double, std::milli>() << sep
+		<< Profiler::analyze("upda").avg.value<double, std::milli>() << "\n";
+}
+
 int main(int argc, char* argv[]) {
 	ColonyFactory::add<SequentialOptimizer>();
 	ColonyFactory::add<ManyAntOptimizer>();
@@ -47,6 +91,8 @@ int main(int argc, char* argv[]) {
 	cli.addParameter("colony", "Selects the colony to run. Colony arguments are separated by a colon (:)", {"c"});
 	cli.addParameter("rounds", "How many rounds of optimization should be run", {"r"}, "500");
 	cli.addParameter("seed", "Controls the random-number-generator seed", {}, "thomas");
+	cli.addParameter("output", "Specify an output file to write the profiler results to", {"o"});
+	cli.addFlag("append", "Append to the file specified by --output instead of overwriting it. Used only when --output is specified", {"a"});
 
 	cli.parse(argc, argv);
 
@@ -62,11 +108,9 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (cli.flag("list")) {
-		std::cout << "Available optimization variants:\n";
 		for (const auto& e : ColonyFactory::variants) {
-			std::cout << "  " << e.second->signature() << "\n";
+			std::cout << e.second->signature() << "\n";
 		}
-		std::cout << std::endl;
 		return EXIT_SUCCESS;
 	}
 
@@ -124,29 +168,40 @@ int main(int argc, char* argv[]) {
 	optimizer->optimize(rounds);
 	Profiler::stop("optr");
 
-	auto basic_analysis = Profiler::analyze("opts");
-	std::cout
-		<< "Finished!\n"
-		<< "Variant: " << colonyIdentifier << (colonyArguments.empty() ? "" : ":" + colonyArguments) << "\n"
-		<< "Result length: " << optimizer->best_route_length << " (" << problem.solution_bounds.first << ", " << problem.solution_bounds.second << ")\n"
-		<< "Prepare Time: " << Profiler::first("prep").value<double, std::milli>() << "ms\n"
-		<< "Execution Time: " << Profiler::first("optr").value<double, std::milli>() << "ms\n"
-		<< "Step Time:\n" 
-			<< "  min: " << basic_analysis.min.value<double, std::milli>() << "ms\n"
-			<< "  max: " << basic_analysis.max.value<double, std::milli>() << "ms\n"
-			<< "  avg: " << basic_analysis.avg.value<double, std::milli>() << "ms\n";
-		
-	for (const auto& id : Profiler::measurement_keys()) {
-		auto analysis = Profiler::analyze(id);
+	if (cli.param("output").empty()) {
+		auto basic_analysis = Profiler::analyze("opts");
 		std::cout
-			<< "Measurement '" << id << "':\n"
-			<< "  min: " << analysis.min.value<double, std::milli>() << "ms\n"
-			<< "  max: " << analysis.max.value<double, std::milli>() << "ms\n"
-			<< "  avg: " << analysis.avg.value<double, std::milli>() << "ms\n";
-	}
+			<< "Finished!\n"
+			<< "Variant: " << colonyIdentifier << (colonyArguments.empty() ? "" : ":" + colonyArguments) << "\n"
+			<< "Result length: " << optimizer->best_route_length << " (" << problem.solution_bounds.first << ", " << problem.solution_bounds.second << ")\n"
+			<< "Prepare Time: " << Profiler::first("prep").value<double, std::milli>() << "ms\n"
+			<< "Execution Time: " << Profiler::first("optr").value<double, std::milli>() << "ms\n"
+			<< "Step Time:\n" 
+				<< "  min: " << basic_analysis.min.value<double, std::milli>() << "ms\n"
+				<< "  max: " << basic_analysis.max.value<double, std::milli>() << "ms\n"
+				<< "  avg: " << basic_analysis.avg.value<double, std::milli>() << "ms\n";
 
-	std::cout
-		<< "Score: " << static_cast<double>(rounds) / Profiler::first("optr").value<double>()  << " RPS\n"
-		<< std::endl;
+		for (const auto& id : Profiler::measurement_keys()) {
+			auto analysis = Profiler::analyze(id);
+			std::cout
+				<< "Measurement '" << id << "':\n"
+				<< "  min: " << analysis.min.value<double, std::milli>() << "ms\n"
+				<< "  max: " << analysis.max.value<double, std::milli>() << "ms\n"
+				<< "  avg: " << analysis.avg.value<double, std::milli>() << "ms\n";
+		}
+
+		std::cout
+			<< "Score: " << static_cast<double>(rounds) / Profiler::first("optr").value<double>()  << " RPS\n"
+			<< std::endl;
+	}
+	else {
+		output_profiler(
+			cli.param("output"),
+			cli.flag("append"),
+			colonyIdentifier + (colonyArguments.empty() ? "" : ":" + colonyArguments),
+			problem.name,
+			rounds);
+	}
+	
 	return EXIT_SUCCESS;
 }

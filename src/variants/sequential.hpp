@@ -93,6 +93,7 @@ public:
 
 			Ant* best_ant = nullptr;
 
+			Profiler::start("adva");
 			// Let ants wander ; Keep track of the best ant & best route
 			for (Ant& ant : ants) {
 				// Init Ant
@@ -120,7 +121,13 @@ public:
 					best_ant = &ant;
 				}
 			}
+			Profiler::stop("adva");
 
+			Profiler::start("eval");
+			// eval phase is integrated into advance phase... Just pretend it is instant i guess 
+			Profiler::stop("eval");
+
+			Profiler::start("upda");
 			// Evaporate pheromone
 			for (auto& value : pheromone.adjacency_matrix.data) {
 				value *= (1.0 - params.rho);
@@ -139,6 +146,7 @@ public:
 			for (auto& value : pheromone.adjacency_matrix.data) {
 				value = std::clamp(value, params.min_pheromone, params.max_pheromone);
 			}
+			Profiler::stop("upda");
 
 			Profiler::stop("opts");
 		}

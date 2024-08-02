@@ -62,7 +62,7 @@ public:
 	Graph<double> pheromone;
 
 	void prepare() override {
-		setupCL(true);
+		setupCL(false);
 		program = loadProgramVariant(static_name);
 
 		pheromone_d = createAndFillBuffer(problem.sizeSqr(), false, pheromone);
@@ -92,16 +92,22 @@ public:
 			Profiler::start("opts");
 
 			// TODO : Not 1:1 same rng as sequential because sequential reseeds rng every round
+			
+			Profiler::start("adva");
 			advanceAnts();
+			Profiler::stop("adva");
 
+			Profiler::start("eval");
 			queue.enqueueReadBuffer(routes_length_d, CL_TRUE, 0, sizeof(int) * ant_route_lengths.size(), ant_route_lengths.data());
 			//l::copy(queue, routes_length_d, ant_route_lengths.begin(), ant_route_lengths.end());
 			auto best_ant_it = std::min_element(ant_route_lengths.begin(), ant_route_lengths.end());
 			size_t best_ant_idx = std::distance(ant_route_lengths.begin(), best_ant_it);
 			queue.enqueueReadBuffer(routes_d, CL_TRUE, best_ant_idx * problem.size() * sizeof(int), sizeof(int) * problem.size(), ant_route.data());
 			best_route_length = std::min(*best_ant_it, best_route_length);
+			Profiler::stop("eval");
 			
 
+			Profiler::start("upda");
 			for (auto& value : pheromone.adjacency_matrix.data) {
 				value *= (1.0 - params.rho);
 			}
@@ -129,6 +135,7 @@ public:
 				ant_allowed_d, CL_TRUE, 0,
 				sizeof(int) * allowed_data.adjacency_matrix.data.size(),
 				allowed_data.adjacency_matrix.data.data());
+			Profiler::stop("upda");
 
 			Profiler::stop("opts");
 		}
