@@ -37,7 +37,9 @@ std::filesystem::path path,
 bool append,
 std::string variant,
 std::string problem,
-unsigned int rounds) {
+unsigned int rounds,
+int score,
+int score_cap) {
 	bool existed = std::filesystem::exists(path);
 	std::fstream file(path, std::fstream::in | std::fstream::out | (append ? std::fstream::app : std::fstream::trunc));
 
@@ -53,7 +55,9 @@ unsigned int rounds) {
 			<< "opts" << sep
 			<< "adva" << sep
 			<< "eval" << sep
-			<< "upda" << "\n";
+			<< "upda" << sep
+			<< "score" << sep
+			<< "score_cap" << "\n";
 	}
 
 	file 
@@ -66,7 +70,9 @@ unsigned int rounds) {
 		<< Profiler::analyze("opts").avg.value<double, std::milli>() << sep
 		<< Profiler::analyze("adva").avg.value<double, std::milli>() << sep
 		<< Profiler::analyze("eval").avg.value<double, std::milli>() << sep
-		<< Profiler::analyze("upda").avg.value<double, std::milli>() << "\n";
+		<< Profiler::analyze("upda").avg.value<double, std::milli>() << sep
+		<< score << sep
+		<< score_cap << "\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -127,7 +133,7 @@ int main(int argc, char* argv[]) {
 	size_t argumentSep = colonyIdentifier.find_first_of(':');
 	if (argumentSep != std::string::npos) {
 		colonyArguments = colonyIdentifier.substr(argumentSep + 1);
-		colonyIdentifier = colonyIdentifier.substr(0, argumentSep - 1);
+		colonyIdentifier = colonyIdentifier.substr(0, argumentSep);
 	}
 	
 	ColonyFactory* factory = ColonyFactory::get(colonyIdentifier);
@@ -200,7 +206,9 @@ int main(int argc, char* argv[]) {
 			cli.flag("append"),
 			colonyIdentifier + (colonyArguments.empty() ? "" : ":" + colonyArguments),
 			problem.name,
-			rounds);
+			rounds,
+			optimizer->best_route_length,
+			problem.solution_bounds.first);
 	}
 	
 	return EXIT_SUCCESS;

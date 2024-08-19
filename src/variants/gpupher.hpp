@@ -66,7 +66,7 @@ protected:
 	}
 
 	void updatePheromone(uint best_ant, double spread) {
-		cl::NDRange global_size(problem.size() * problem.size());
+		cl::NDRange global_size(problem.sizeSqr());
 		updatePheromoneCL(
 			cl::EnqueueArgs(queue, global_size),
 			pheromone_d,
@@ -81,7 +81,7 @@ protected:
 	}
 
 	void resetAllowed() {
-		cl::NDRange global_size(problem.size() * problem.size());
+		cl::NDRange global_size(problem.sizeSqr());
 		resetAllowedCL(
 			cl::EnqueueArgs(queue, global_size),
 			ant_allowed_template_d,
@@ -127,7 +127,6 @@ public:
 		advanceAntsCL = decltype(advanceAntsCL)(cl::Kernel(program, "wander_ant"));
 		updatePheromoneCL = decltype(updatePheromoneCL)(cl::Kernel(program, "update_pheromone"));
 		resetAllowedCL = decltype(resetAllowedCL)(cl::Kernel(program, "reset_allowed"));
-
 
 		resetAllowed();
 	}

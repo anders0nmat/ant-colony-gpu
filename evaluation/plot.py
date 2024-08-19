@@ -1,21 +1,29 @@
 import matplotlib.pyplot as plt
+import matplotlib.axes
 import numpy as np
 import csv
 import argparse
 from dataclasses import dataclass
+from collections import defaultdict
 
 argumentParser = argparse.ArgumentParser()
-argumentParser.add_argument("file", help="CSV-file with result data")
+argumentParser.add_argument("file", nargs="+", help="CSV-file with result data")
 argumentParser.add_argument("-w", "--width", type=float, default=0.5, help="Width of bars")
 argumentParser.add_argument("-e", "--errors", action="store_true", help="Show error bars")
+argumentParser.add_argument("-l", "--log", action="store_true", help="Use logarithmic y-scale")
+argumentParser.add_argument("-o", "--output", default=None, help="Automatically export the created ficure to OUTPUT")
+argumentParser.add_argument("-t", "--title", default="", help="Set title of figure")
+
+argumentParser.add_argument("--order", action="append", help="Orders the output groups")
 
 g1 = argumentParser.add_mutually_exclusive_group()
-g1.add_argument("-v", "--variant", action="store_true", help="Use variant name as caption only")
-g1.add_argument("-p", "--problem", action="store_true", help="Use problem name as caption only")
+g1.add_argument("-v", "--variant", action="store_true", help="Group by Variant")
+g1.add_argument("-p", "--problem", action="store_true", help="Group by Problem")
 
 g2 = argumentParser.add_mutually_exclusive_group()
 g2.add_argument("-s", "--sections", action="store_true", help="Show execution sections: adva, eval, upda")
 g2.add_argument("-c", "--score", action="store_true", help="Show normalized RPS score instead of execution time")
+g2.add_argument("--section", action="append", help="Only show the specified measurement section")
 
 args = argumentParser.parse_args()
 
@@ -73,89 +81,130 @@ class Profile:
 
 variants: dict[tuple[str, str],Profile] = {}
 
-with open(args.file) as f:
-    data = csv.DictReader(f, delimiter=";")
-    
-    for line in data:
-        key = (line["variant"], line["problem"])
+for file in args.file:
+    with open(file) as f:
+        data = csv.DictReader(f, delimiter=";")
+        
+        for line in data:
+            key = (line["variant"], line["problem"])
+            if line["variant"].startswith("#"):
+                continue
+            profile = Profile(
+                rounds=int(line["rounds"]),
+                prep=float(line["prep"]),
+                optr=float(line["optr"]),
+                opts=float(line["opts"]),
+                adva=float(line["adva"]),
+                eval=float(line["eval"]),
+                upda=float(line["upda"])
+            )
 
-        profile = Profile(
-            rounds=int(line["rounds"]),
-            prep=float(line["prep"]),
-            optr=float(line["optr"]),
-            opts=float(line["opts"]),
-            adva=float(line["adva"]),
-            eval=float(line["eval"]),
-            upda=float(line["upda"])
-        )
+            if key not in variants:
+                variants[key] = profile
+            else:
+                variants[key].add(profile)        
 
-        if key not in variants:
-            variants[key] = profile
+keys = args.order
+if not keys and (args.variant or args.problem):
+    keys = []
+    all_keys = set()
+    available_keys = defaultdict(set)
+    for v, p in variants.keys():
+        if args.variant:
+            available_keys[p].add(v)
+            if v not in all_keys:
+                all_keys.add(v)
+                keys.append(v)
         else:
-            variants[key].add(profile)        
+            available_keys[v].add(p)
+            if p not in all_keys:
+                all_keys.add(p)
+                keys.append(p)
+    matching_subset = all_keys
+    for subset in available_keys.values():
+        matching_subset &= subset
 
-entries = []
+    keys = list(filter(lambda x: x in matching_subset, keys))
 
-if args.sections:
+entries = {}
+
+if args.sections or args.section:
     data = {
-        "adva": [],
-        "eval": [],
-        "upda": [],
-        "etc": [],
+        "adva": defaultdict(dict),
+        "eval": defaultdict(dict),
+        "upda": defaultdict(dict),
+        "etc": defaultdict(dict),
     }
 else:
     data = {
-        "etc": [],
+        "etc": defaultdict(dict),
     }
 
 error = [
-    [],
-    []
+    defaultdict(dict),
+    defaultdict(dict),
 ]
 
 
 for (variant, problem), value in variants.items():
     value.average()
     value.total()
-    
-    if value.optr > 1000:
-        continue
 
     if args.variant:
-        entries.append(f"{variant}")
+        entries[f"{variant}"] = None
+        key = problem
+        v = variant
     elif args.problem:
-        entries.append(f"{problem}")
+        entries[f"{problem}"] = None
+        key = variant
+        v = problem
     else:
-        entries.append(f"{variant}\n{problem}")
+        entries[f"{variant}\n{problem}"] = None
+        key = f"{variant}\n{problem}"
+        v = key
 
-    if args.sections:
-        data["adva"].append(value.adva)
-        data["eval"].append(value.eval)
-        data["upda"].append(value.upda)
-        data["etc"].append(value.etc)
+    if args.sections or args.section:
+        data["adva"][key][v] = (value.adva)
+        data["eval"][key][v] = (value.eval)
+        data["upda"][key][v] = (value.upda)
+        data["etc"][key][v] = (value.etc)
     elif args.score:
-        data["etc"].append(value.rounds / value.optr)
+        data["etc"][key][v] = (value.rounds * 1000 / value.optr)
     else:
-        data["etc"].append(value.optr)
+        data["etc"][key][v] = (value.optr)
 
-    error[0].append(value.optr - value.minmax[0])
-    error[1].append(value.minmax[1] - value.optr)
+    error[0][key][v] = (value.optr - value.minmax[0])
+    error[1][key][v] = (value.minmax[1] - value.optr)
 
 width = args.width
+x = np.arange(len(keys))
 
 fig, ax = plt.subplots()
-bottom = np.zeros(len(entries))
+ax: matplotlib.axes.Axes # IDE Type annotation
+bottoms = {key: np.zeros(len(keys)) for key in data["etc"]}
 
-for boolean, weight_count in data.items():
-    p = ax.bar(entries, weight_count, width, label=boolean, yerr=error if args.errors and boolean == "etc" else None, bottom=bottom)
-    bottom += weight_count
+for category, values in ((k, v) for k, v in data.items() if not args.section or k in args.section):
+    for index, kw in enumerate(values.items()):
+        offset = index * width
+        (key, weights) = kw
+        weights = [weights[k] for k in keys]
+        errVal = None
+        if args.errors and category == "etc":
+            errVal = (
+                [error[0][key][k] for k in keys],
+                [error[1][key][k] for k in keys],
+            )
 
-if args.score:
-    ax.set_title("Rounds per second of Variants on example Problems (higher is better)")
+        p = ax.bar(x + offset, weights, width, label=category if args.sections or args.section else key, yerr=errVal, bottom=bottoms[key])
+        bottoms[key] += weights
+
+ax.set_title(args.title)
+ax.legend(loc="upper left")
+ax.set_xticks(x + width * 0.5 * (len(data["etc"]) - 1), keys)
+if args.log:
+    ax.semilogy()
+
+if args.output is not None:
+    fig.savefig(args.output, dpi=200)
 else:
-    ax.set_title("Execution Time of Variants on example Problems (lower is better)")
-ax.legend(loc="upper right")
-#ax.semilogy()
-#ax.set_yscale("logit")
-
-plt.show()
+    plt.show()

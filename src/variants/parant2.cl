@@ -198,7 +198,7 @@ int problem_size
 }
 
 void kernel reset_allowed(
-constant const int* allowed_template,
+global const int* allowed_template,
 global int* allowed_data
 ) {
 	int id = get_global_id(0);
