@@ -5,6 +5,7 @@ import csv
 import argparse
 from dataclasses import dataclass
 from collections import defaultdict
+import re
 
 argumentParser = argparse.ArgumentParser()
 argumentParser.add_argument("file", nargs="+", help="CSV-file with result data")
@@ -14,7 +15,7 @@ argumentParser.add_argument("-l", "--log", action="store_true", help="Use logari
 argumentParser.add_argument("-o", "--output", default=None, help="Automatically export the created ficure to OUTPUT")
 argumentParser.add_argument("-t", "--title", default="", help="Set title of figure")
 
-argumentParser.add_argument("--order", action="append", help="Orders the output groups")
+argumentParser.add_argument("--order", action="extend", nargs="+", help="Orders the output groups")
 
 g1 = argumentParser.add_mutually_exclusive_group()
 g1.add_argument("-v", "--variant", action="store_true", help="Group by Variant")
@@ -182,6 +183,7 @@ x = np.arange(len(keys))
 fig, ax = plt.subplots()
 ax: matplotlib.axes.Axes # IDE Type annotation
 bottoms = {key: np.zeros(len(keys)) for key in data["etc"]}
+ax.ticklabel_format(axis="y",style="sci", scilimits=(0, 0), useMathText=True)
 
 for category, values in ((k, v) for k, v in data.items() if not args.section or k in args.section):
     for index, kw in enumerate(values.items()):
@@ -199,8 +201,11 @@ for category, values in ((k, v) for k, v in data.items() if not args.section or 
         bottoms[key] += weights
 
 ax.set_title(args.title)
+ax.set_ylabel("execution time (seconds)")
+ax.set_xlabel("problem size")
+#ax.yaxis.set_major_formatter("{x:.0e}")
 ax.legend(loc="upper left")
-ax.set_xticks(x + width * 0.5 * (len(data["etc"]) - 1), keys)
+ax.set_xticks(x + width * 0.5 * (len(data["etc"]) - 1), labels=[re.match(r"ESC63s(\d+)\.sop", k).group(1) for k in keys])
 if args.log:
     ax.semilogy()
 

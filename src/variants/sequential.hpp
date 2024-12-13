@@ -116,15 +116,16 @@ public:
 
 				// Calculate performance of ant (== route length)
 				ant.route_length = problem.weights.route_length(ant.route.begin(), ant.route.end());
-				best_route_length = std::min(best_route_length, ant.route_length);
-				if (best_ant == nullptr || best_ant->route_length > ant.route_length) {
-					best_ant = &ant;
-				}
 			}
 			Profiler::stop("adva");
 
 			Profiler::start("eval");
-			// eval phase is integrated into advance phase... Just pretend it is instant i guess 
+			for (Ant& ant : ants) {
+				best_route_length = std::min(best_route_length, ant.route_length);
+				if (best_ant == nullptr || best_ant->route_length > ant.route_length) {
+					best_ant = &ant;
+				}	
+			}
 			Profiler::stop("eval");
 
 			Profiler::start("upda");

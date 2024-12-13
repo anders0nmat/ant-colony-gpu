@@ -171,7 +171,7 @@ protected:
 		return result;
 	}
 
-	Graph<int> getAllowedData() {
+	std::vector<int> getAllowedList() {
 		std::vector<int> allowed_prototype(problem.size(), 0);
 		for (int i = 0; i < problem.dependencies.adjacency_matrix.dimension; i++) {
 			int acc = 0;
@@ -188,6 +188,11 @@ protected:
 			}
 		}
 		allowed_prototype.at(0) = -1;
+		return allowed_prototype;	
+	}
+
+	Graph<int> getAllowedData() {
+		std::vector<int> allowed_prototype = getAllowedList();
 		Graph<int> result(problem.size(), 0);
 		for (auto it = result.adjacency_matrix.data.begin(); it != result.adjacency_matrix.data.end(); std::advance(it, problem.size())) {
 			std::copy(allowed_prototype.begin(), allowed_prototype.end(), it);

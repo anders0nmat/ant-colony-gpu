@@ -18,6 +18,7 @@
 #include "variants/parant4.hpp"
 #include "variants/localant.hpp"
 #include "variants/neighbor.hpp"
+#include "variants/constant.hpp"
 #include "variants/gpumax.hpp"
 
 
@@ -90,6 +91,7 @@ int main(int argc, char* argv[]) {
 	ColonyFactory::add<ParAnt4Optimizer>();
 	ColonyFactory::add<LocalAntOptimizer>();
 	ColonyFactory::add<NeighborOptimizer>();
+	ColonyFactory::add<ConstAntOptimizer>();
 	ColonyFactory::add<GpuMaxOptimizer>();
 
 	cli.addFlag("help", "Prints this help message", {"h"});

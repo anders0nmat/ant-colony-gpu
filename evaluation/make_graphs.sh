@@ -96,3 +96,15 @@ python evaluation/plot.py \
 	-t "Execution time of variant 'parant' on increasing problem sizes" \
 	-o evaluation/figures/parant-seq.png \
 	evaluation/parant-seq.profile.csv
+python evaluation/plot.py \
+	-p \
+	-w 0.25 \
+	-t "Execution time of variant 'depmask' and 'samplemask on increasing problem sizes" \
+	-o evaluation/figures/depmask-samplemask-seq.png \
+	evaluation/depmask-samplemask-step.profile.csv
+python evaluation/plot.py \
+	-p \
+	-w 0.2 \
+	evaluation/parantN-big-step.profile.csv \
+	--order ESC63s400.sop ESC63s500.sop ESC63s600.sop ESC63s700.sop ESC63s800.sop ESC63s900.sop ESC63s1000.sop
+	-o evaluation/figures/parantN-big-step-nice.png
